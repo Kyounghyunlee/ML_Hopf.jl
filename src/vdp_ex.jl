@@ -7,6 +7,7 @@ using DiffEqFlux
 using LaTeXStrings
 using PGFPlotsX
 using Statistics
+using Serialization
 
 function vdp(du, u, p, t)
     μ = p[1]
@@ -209,8 +210,8 @@ siθ = sin.(θ)
 tl = 30.0;
 st = 0.01;
 st2 = 0.02;
-vel_l = 3
-Vel = range(0.2; stop=1.0, length=vel_l)
+vel_l = 6
+Vel = range(0.1; stop=1.0, length=vel_l)
 nh = 20
 
 dat = generate_data_vdp(vel_l, Vel, nh)
@@ -314,7 +315,7 @@ function loss_nt_vdp(θ_t)
     return sum(abs2, AA .- pred) # + 1e-5*sum(sum.(abs, params(ann)))
 end
 
-hidden = 31
+hidden = 21
 ann = FastChain(
     FastDense(3, hidden, tanh), FastDense(hidden, hidden, tanh), FastDense(hidden, 2)
 )
@@ -327,7 +328,7 @@ loss_nt_vdp(θn)
 
 res1 = DiffEqFlux.sciml_train(loss_nt_vdp, θn, ADAM(0.01); maxiters=300)
 res1 = DiffEqFlux.sciml_train(
-    loss_nt_vdp, res1.minimizer, BFGS(; initial_stepnorm=1e-5); maxiters=10000
+    loss_nt_vdp, res1.minimizer, BFGS(; initial_stepnorm=1e-5); maxiters=1000
 )
 θ_2 = res1.minimizer
 
@@ -352,6 +353,7 @@ a = @pgf Axis(
 )
 #pgfsave("./Figures/num_vdp/vdp_1.pdf",a)
 
+ind=6
 a = @pgf Axis(
     {
         xlabel = L"$z_1$",
@@ -364,9 +366,9 @@ a = @pgf Axis(
         ymin = -5.5,
         ymax = 5.5,
     },
-    Plot({color = "red", no_marks}, Coordinates(Ap[3][1, :], Ap[3][2, :])),
+    Plot({color = "red", no_marks}, Coordinates(Ap[ind][1, :], Ap[ind][2, :])),
     LegendEntry("Learnt model"),
-    Plot({color = "blue", no_marks}, Coordinates(t_series[3][1, :], t_series[3][2, :])),
+    Plot({color = "blue", no_marks}, Coordinates(t_series[ind][1, :], t_series[ind][2, :])),
     LegendEntry("Ground truth"),
 )
 
@@ -436,9 +438,9 @@ function dudt_nf_vdp(u, p, t)
     ω₁ = p[2]
     uu = [r * cos(θ), r * sin(θ), ν]
     hc = ann3(ν, p[3:end])
-    phs_s = [hc[nh2 + i + 1] * sin(i * θ) for i in 1:nh2]
+    phs_s = [hc[nh2 + i] * sin(i * θ) for i in 1:nh2]
     phs_s = sum(phs_s)
-    phs_c = [hc[i + 1] * cos(i * θ) for i in 1:nh2]
+    phs_c = [hc[i] * cos(i * θ) for i in 1:nh2]
     phs_c = sum(phs_c)
     ph = ω₀ + ν * ω₁ + ann3(uu, p[3:end])[1] / scale_f
     du₁ = ν * u[1] - u[2] * ph + a2 * u[1] * r2
@@ -480,8 +482,36 @@ function predict_time_T_vdp(p) #,uu_t0
     return Pr
 end
 
-st3 = 0.05
+function predict_time_T_vdp2(p) #,uu_t0
+    np1 = θ_2[1]
+    pn = θ_2[2:end]
+    p1, p2, p3, p4 = θ_[1:4]
+    T = [p1 p3; p2 p4]
+    A1 = [
+        Array(
+            concrete_solve(
+                ODEProblem(dudt_nf_vdp, u_t0[i], (0, tl2), p),
+                Tsit5(),
+                u_t0[i],
+                p;
+                saveat=st3,
+                abstol=1e-8,
+                reltol=1e-8,
+                sensealg=InterpolatingAdjoint(; autojacvec=ReverseDiffVJP()),
+            ),
+        ) for i in 1:length(Vel)
+    ]
+    uu = [transpose(hcat(A1[i][1, :], A1[i][2, :], A1[i][3, :])) for i in 1:vl]
+    delU = zeros(2, spl2)
+    delU2 = -np1 * ones(1, spl2)
+    delU = vcat(delU, delU2)
+    uu = [uu[i] + delU for i in 1:vl]
+    vlT = [T * uu[i][1:2, :] + Array_chain(uu[i], ann, pn) / scale_f_pp for i in 1:vl]
 
+    return vlT
+end
+
+st3 = 0.05
 t_s3 = [
     Array(
         concrete_solve(
@@ -518,20 +548,22 @@ function loss_time_T_vdp(p)
     return sum(abs2, A3 .- pred) # + 1e-5*sum(sum.(abs, params(ann)))
 end
 
-hidden = 31
+hidden = 11
 nh2 = 10
-ann3 = FastChain(FastDense(3, hidden, tanh), FastDense(hidden, nh2 * 2 + 1, tanh))
+ann3 = FastChain(FastDense(3, hidden, tanh), FastDense(hidden, nh2 * 2, tanh))
 np = initial_params(ann3)
 aa = [-1, 0.16]
 p = vcat(aa, np)
 scale_f = 1
 ##harmonic representation of phase
-res1 = DiffEqFlux.sciml_train(loss_time_T_vdp, p, ADAM(0.01); maxiters=200)
+res1 = DiffEqFlux.sciml_train(loss_time_T_vdp, p, ADAM(0.01); maxiters=2000)
+#=
 res1 = DiffEqFlux.sciml_train(
     loss_time_T_vdp, p, NADAM(0.002, (0.89, 0.995)); maxiters=4000
 )
+=#
 res1 = DiffEqFlux.sciml_train(
-    loss_time_T_vdp, res1.minimizer, BFGS(; initial_stepnorm=1e-5); maxiters=30000
+    loss_time_T_vdp, res1.minimizer, BFGS(; initial_stepnorm=1e-5); maxiters=1000
 )
 
 res1.minimum
@@ -554,7 +586,7 @@ a = @pgf Axis(
     },
     Plot(
         {color = "red", no_marks},
-        Coordinates(tv, predict_time_T_vdp2(p)[2 * (ind - 1) + 1, :]),
+        Coordinates(tv, predict_time_T_vdp2(p)[ind][1, :]),
     ),
     LegendEntry("Learnt model"),
     Plot({color = "blue", no_marks}, Coordinates(tv, t_s3[ind][1, :])),
@@ -585,3 +617,273 @@ a = @pgf Axis(
 )
 
 #pgfsave("./Figures/num_vdp/vdp_t_100.pdf",a)
+
+
+Vel2=[0.2,0.6,0.95]
+vel_l2=length(Vel2)
+dat2 = generate_data_vdp(vel_l2, Vel2, nh)
+AA2 = dat2.data
+tl2 = 10.0
+
+tt = Int(tl2 / st2 + 1)
+t_series2 = [dat2.ts[i][:, 1:tt] for i in 1:length(Vel2)]
+θ_series2 = [dat2.theta_s[i][1:tt] for i in 1:length(Vel2)]
+st3 = 0.05
+t_s32 = [
+    Array(
+        concrete_solve(
+            ODEProblem(vdp, t_series2[i][:, 1], (0, tl2), Vel2[i]),
+            Tsit5(),
+            t_series2[i][:, 1],
+            Vel2[i];
+            saveat=st3,
+        ),
+    ) for i in 1:length(Vel2)
+]
+t_s22 = [atan2(t_s32[i]) for i in 1:length(Vel2)]
+
+spl22 = length(t_s22[1])
+vl2 = length(Vel2)
+t_s2 = zeros(vl2, spl22)
+
+tol = 1e-8
+np1 = θ_2[1]
+pn = θ_2[2:end]
+s_amp2 = [sqrt(Vel2[i] - np1) for i in 1:length(Vel2)]
+theta02 = [t_s22[i][1] for i in 1:length(Vel2)]
+θ₀2 = [Inv_T_u_vdp(theta02[i], Vel2[i], tol).th for i in 1:length(Vel2)]
+u_t02 = [[s_amp2[i] * cos.(θ₀2[i]), s_amp2[i] * sin.(θ₀2[i]), Vel2[i]] for i in 1:length(Vel2)]
+
+
+function predict_time_T_vdp_u(p,Vel,u_t0) #,uu_t0
+    np1 = θ_2[1]
+    pn = θ_2[2:end]
+    p1, p2, p3, p4 = θ_[1:4]
+    T = [p1 p3; p2 p4]
+    A1 = [
+        Array(
+            concrete_solve(
+                ODEProblem(dudt_nf_vdp, u_t0[i], (0, tl2), p),
+                Tsit5(),
+                u_t0[i],
+                p;
+                saveat=st3,
+                abstol=1e-8,
+                reltol=1e-8,
+                sensealg=InterpolatingAdjoint(; autojacvec=ReverseDiffVJP()),
+            ),
+        ) for i in 1:length(Vel)
+    ]
+    uu = [transpose(hcat(A1[i][1, :], A1[i][2, :], A1[i][3, :])) for i in 1:vl2]
+    delU = zeros(2, spl2)
+    delU2 = -np1 * ones(1, spl2)
+    delU = vcat(delU, delU2)
+    uu = [uu[i] + delU for i in 1:vl2]
+    vlT = [T * uu[i][1:2, :] + Array_chain(uu[i], ann, pn) / scale_f_pp for i in 1:vl2]
+
+    return vlT
+end
+
+
+using Serialization
+#data_vdp=(θ_=θ_,θn=θn,p=p,Vel2=Vel2,u_t02=u_t02,dat2=dat2)
+#serialize("num_vdp.jls",data_vdp)
+newdata = deserialize("num_vdp.jls")
+θ_=newdata.θ_;θn=newdata.θn;p=newdata.p;Vel2=newdata.Vel2;u_t02=newdata.u_t02;dat2=newdata.dat2
+gu=predict_time_T_vdp_u(p,Vel2,u_t02)
+
+ind=1
+a = @pgf Axis(
+    {
+        xlabel = "Time (sec)",
+        ylabel = L"$z_1$",
+        legend_pos = "south east",
+        height = "6cm",
+        width = "6cm",
+        xmin = 0,
+        xmax = 10,
+        ymax = 4,
+        ymin = -4,
+        ylabel_shift="-10pt",
+        xlabel_shift="-3pt",
+        title="(b-2)"
+    },
+    Plot(
+        {color = "red", no_marks},
+        Coordinates(tv, gu[ind][1,:]),
+    ),
+  #  LegendEntry("Learnt model"),
+    Plot({color = "blue", no_marks}, Coordinates(tv, t_s32[ind][1, :])),
+ #   LegendEntry("Ground truth"),
+)
+@pgf a["every axis title/.style"] = "below right,at={(0,1)}";
+
+ind=2
+b = @pgf Axis(
+    {
+        xlabel = "Time (sec)",
+     #   ylabel = L"$z_1$",
+        legend_pos = "south east",
+        height = "6cm",
+        width = "6cm",
+        xmin = 0,
+        xmax = 10,
+        ymax = 4,
+        ymin = -4,
+        ylabel_shift="-10pt",
+        xlabel_shift="-3pt",
+        title="(c-2)"
+    },
+    Plot(
+        {color = "red", no_marks},
+        Coordinates(tv, gu[ind][1,:]),
+    ),
+  #  LegendEntry("Learnt model"),
+    Plot({color = "blue", no_marks}, Coordinates(tv, t_s32[ind][1, :])),
+ #   LegendEntry("Ground truth"),
+)
+@pgf b["every axis title/.style"] = "below right,at={(0,1)}";
+
+ind=3
+c = @pgf Axis(
+    {
+        xlabel = "Time (sec)",
+       # ylabel = L"$z_1$",
+        legend_pos = "south east",
+        height = "6cm",
+        width = "6cm",
+        xmin = 0,
+        xmax = 10,
+        ymax = 4,
+        ymin = -4,
+        ylabel_shift="-10pt",
+        xlabel_shift="-3pt",
+        title="(d-2)"
+    },
+    Plot(
+        {color = "red", no_marks},
+        Coordinates(tv, gu[ind][1,:]),
+    ),
+  #  LegendEntry("Learnt model"),
+    Plot({color = "blue", no_marks}, Coordinates(tv, t_s32[ind][1, :])),
+ #   LegendEntry("Ground truth"),
+)
+@pgf c["every axis title/.style"] = "below right,at={(0,1)}";
+
+ind=1
+d = @pgf Axis(
+    {
+        xlabel = L"$z_1$",
+        ylabel = L"$z_2$",
+        legend_pos = "north west",
+        height = "6cm",
+        width = "6cm",
+        xmin = -3,
+        xmax = 3,
+        ymin = -5.5,
+        ymax = 5.5,
+        ylabel_shift="-10pt",
+        xlabel_shift="-3pt",
+        title="(b-1)"
+    },
+    Plot({color = "red", no_marks}, Coordinates(gu[ind][1, :], gu[ind][2, :])),
+    Plot({color = "blue", no_marks}, Coordinates(t_s32[ind][1, :], t_s32[ind][2, :])),
+)
+@pgf d["every axis title/.style"] = "below right,at={(0,1)}";
+
+ind=2
+e = @pgf Axis(
+    {
+        xlabel = L"$z_1$",
+       # ylabel = L"$z_2$",
+        legend_pos = "north west",
+        height = "6cm",
+        width = "6cm",
+        xmin = -3,
+        xmax = 3,
+        ymin = -5.5,
+        ymax = 5.5,
+        ylabel_shift="-10pt",
+        xlabel_shift="-3pt",
+        title="(c-1)"
+    },
+    Plot({color = "red", no_marks}, Coordinates(gu[ind][1, :], gu[ind][2, :])),
+    Plot({color = "blue", no_marks}, Coordinates(t_s32[ind][1, :], t_s32[ind][2, :])),
+)
+@pgf e["every axis title/.style"] = "below right,at={(0,1)}";
+
+ind=3
+f = @pgf Axis(
+    {
+        xlabel = L"$z_1$",
+     #   ylabel = L"$z_2$",
+        legend_pos = "north west",
+        height = "6cm",
+        width = "6cm",
+        xmin = -3,
+        xmax = 3,
+        ymin = -5.5,
+        ymax = 5.5,
+        ylabel_shift="-10pt",
+        xlabel_shift="-3pt",
+        title="(d-1)"
+    },
+    Plot({color = "red", no_marks}, Coordinates(gu[ind][1, :], gu[ind][2, :])),
+    Plot({color = "blue", no_marks}, Coordinates(t_s32[ind][1, :], t_s32[ind][2, :])),
+)
+@pgf f["every axis title/.style"] = "below right,at={(0,1)}";
+
+gp=@pgf GroupPlot(
+    { group_style = { group_size="3 by 3" },
+      no_markers,
+      legend_pos="north west",
+      xlabel=raw"$x$",
+    },
+    d, e, f, a,b,c)
+
+##
+
+Vel2=0.02:0.01:1.2
+vel_l2=length(Vel2)
+st=0.01;st2=0.01;
+dat2 = ML_Hopf.generate_data_vdp(vel_l2, Vel2, nh,tl,st,st2,θ_l)
+ts = dat2.ts
+
+amp=zeros(length(ts))
+for i=1:length(ts)
+    amp[i]=maximum(ts[i][1,:])
+end
+
+Ap2 = lt_pp_n_vdp(θ_2,Vel2)
+
+amp2=zeros(length(Ap2))
+for i=1:length(ts)
+    amp2[i]=maximum(Ap2[i][1,:])
+end
+
+amp_t=zeros(length(Vel))
+ts_t = dat.ts
+for i=1:length(ts_t)
+    amp_t[i]=maximum(ts_t[i][1,:])
+end
+
+bd = @pgf Axis(
+    {
+        xlabel = L"$\mu$ ",
+        ylabel = L"$\|z_1\|_{\infty}$",
+        legend_pos = "north west",
+        height = "7cm",
+        width = "11cm",
+        xmin=0,
+        ymin=0,
+        mark_options = {scale = 1.5},
+        title="(a)"
+    },
+    Plot({color = "blue", only_marks}, Coordinates(Vel, amp_t)),
+    Plot({color = "blue", no_marks}, Coordinates(Vel2, amp)),
+    Plot({color = "red", no_marks}, Coordinates(Vel2, amp2)),
+)
+@pgf bd["every axis title/.style"] = "below right,at={(0,1)}";
+
+pgfsave("./Figures/num_vdp/bd_vdp.pdf", bd)
+pgfsave("./Figures/num_vdp/gp_vdp.pdf", gp)

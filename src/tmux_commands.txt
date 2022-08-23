@@ -1,0 +1,2 @@
+tmux new ~/julia-1.7.0/bin/julia
+activate /home/jz18526/Simulation/dev/ML_H

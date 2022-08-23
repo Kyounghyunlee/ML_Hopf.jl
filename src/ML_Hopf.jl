@@ -1,19 +1,16 @@
 module ML_Hopf
 
 # Add core packages to the enviroment
-# add DifferentialEquations, DiffEqFlux, PGFPlotsX, MAT, Plots, NLsolve, StaticArrays, ForwardDiff, LinearAlgebra, Statistics
-
 using DifferentialEquations
 using LinearAlgebra
-using DiffEqFlux
-using PGFPlotsX
+#using DiffEqFlux
 using LaTeXStrings
 using MAT
-using Plots
 using NLsolve
 using Statistics
 using StaticArrays
 using ForwardDiff
+using Statistics
 
 export generate_data, Array_chain
 
@@ -434,6 +431,28 @@ function predict_nt2(
     return hcat(Pr, Pr2)
 end
 
+function predict_nt3(θ_t, θ_, ann_l, scale_f, scale_f2, scale_f_l, ann, nh, Vel, Vel2, θ_l, coθ, siθ)
+    np1 = θ_t[end - 1]
+    np2 = θ_t[end]
+    nf = nf_dis(np1, np2, Vel, Vel2, coθ, siθ)
+    vl = nf.v
+    vl2 = nf.v2
+    p1, p2, p3, p4, p5, p6 = θ_[1:6]
+    T = [p1 p3; p2 p4]
+    dis = transpose([p5 * ones(θ_l) p6 * ones(θ_l)]) / scale_f_l
+    pn1 = θ_[7:(end - 2)]
+    pn2 = θ_t[1:(end - 2)]
+
+    if Vel2==[]
+        vlT = [Nt(vl[i], T, Vel[i], dis, pn1, np1, pn2, ann_l, scale_f, scale_f2, ann) for i in 1:length(Vel)]
+    elseif Vel==[]
+        vlT = [Nt(vl2[i], T, Vel2[i], dis, pn1, np1, pn2, ann_l, scale_f, scale_f2, ann) for i in 1:length(Vel2)]
+    end
+    Pr = f_coeff(vlT, Vel, 0, 0, nh, θ_l)
+    Pr2 = f_coeff(vlT, Vel2, 0, 0, nh, θ_l)
+    return hcat(Pr, Pr2)
+end
+
 function lt_pp_n2(
     θ_t, θ_, ann_l, scale_f, scale_f2, scale_f_l, ann, Vel, Vel2, θ_l, coθ, siθ
 ) # This function gives phase portrait of the transformed system from the normal form (stable LCO)
@@ -497,6 +516,83 @@ function lt_b_dia2(ind, θ_n, θ_, ann_l, ann, scale_f_l, scale_f, scale_f2, co�
     vlTau = [maximum(vlT2[i][ind, :]) - minimum(vlT2[i][ind, :]) for i in 1:length(Vel)]
     return (s=vlTas, u=vlTau, v=Vel)
 end
+
+function lt_b_dia3(ind, θ_n, θ_, ann_l, ann, scale_f_l, scale_f, scale_f2, coθ, siθ,add)
+    vel_l = 300
+    np1 = θ_n[end - 1]
+    np2 = θ_n[end]
+    Vel = range(np1 - np2^2 / 4 + 1e-7; stop=np1, length=vel_l)
+    Vel2 = range(np1 - np2^2 / 4 + 1e-7; stop=np1+add, length=vel_l)
+    p1, p2, p3, p4, p5, p6 = θ_[1:6]
+    T = [p1 p3; p2 p4]
+    pn1 = θ_[7:(end - 2)]
+    pn2 = θ_n[1:(end - 2)]
+
+    nf = nf_dis(np1, np2, Vel2, Vel, coθ, siθ)
+    vl = nf.v
+    vl2 = nf.v2
+    dis = transpose([p5 * ones(length(vl)) p6 * ones(length(vl))]) / scale_f_l
+
+    vlT = [
+        Nt(vl[i], T, Vel2[i], dis, pn1, np1, pn2, ann_l, scale_f, scale_f2, ann) for
+        i in 1:length(Vel2)
+    ]
+    vlT2 = [
+        Nt(vl2[i], T, Vel[i], dis, pn1, np1, pn2, ann_l, scale_f, scale_f2, ann) for
+        i in 1:length(Vel)
+    ]
+
+    vlTas = [maximum(vlT[i][ind, :]) - minimum(vlT[i][ind, :]) for i in 1:length(Vel2)]
+    vlTau = [maximum(vlT2[i][ind, :]) - minimum(vlT2[i][ind, :]) for i in 1:length(Vel)]
+    return (s=vlTas, u=vlTau, v=Vel,v2=Vel2)
+end
+
+
+function vdp(du, u, p, t)
+    μ = p[1]
+    du[1] = u[2]
+    return du[2] = 2 * μ * u[2] - u[1]^2 * u[2] - u[1]
+end
+
+function generate_data_vdp(vel_l, Vel, nh,tl,st,st2,θ_l )
+    #Generate training data
+    u0 = Float32[1.0, 0]
+    tol = 1e-7
+    stol = 1e-8
+    eq = vdp
+    rp = 5
+    ind1 = 1
+    ind2 = 2
+    AA = zeros(vel_l, Int(nh * 2 + 1))
+
+    p_ = Vel[1]
+    g = get_stable_LCO(p_, u0, tl, tol, eq, stol, rp, ind1, ind2, 0.0, 0.0, st)
+    for i in 1:vel_l
+        p_ = Vel[i]
+        g = get_stable_LCO(p_, u0, tl, tol, eq, stol, rp, ind1, ind2, 0.0, 0.0, st)
+        r = g.r
+        t = g.t
+        c = LS_harmonics(r, t, 1, nh).coeff
+        AA[i, :] = c
+    end
+    AA = transpose(AA)
+    θ = range(0; stop=2π, length=θ_l)
+    coθ = cos.(θ)
+    siθ = sin.(θ)
+    t_series = [
+        Transpose(
+            get_stable_LCO(Vel[i], u0, tl, tol, eq, stol, rp, ind1, ind2, 0.0, 0.0, st2).u[
+                :, [1, 2]
+            ],
+        ) for i in 1:vel_l
+    ]
+    θ_series = [
+        get_stable_LCO(Vel[i], u0, tl, tol, eq, stol, rp, ind1, ind2, 0.0, 0.0, st2).t for
+        i in 1:vel_l
+    ]
+    return (data=AA, ts=t_series, coθ=coθ, siθ=siθ, theta_s=θ_series)
+end
+
 
 include("Numerical_Cont_Hopf_CBC.jl")
 
