@@ -779,9 +779,9 @@ bdp = @pgf Axis(
 )
 @pgf bdp["every axis title/.style"] = "below right,at={(0,1)}";
 
-pgfsave("./Figures2/physical/bd_exp.pdf", bdp)
-pgfsave("./Figures2/physical/pp_exp.pdf", gp1)
-pgfsave("./Figures2/physical/ts_exp.pdf", gp2)
+pgfsave("./Figure/physical/bd_exp.pdf", bdp)
+pgfsave("./Figure/physical/pp_exp.pdf", gp1)
+pgfsave("./Figure/physical/ts_exp.pdf", gp2)
 
 ## Validation
 using Plots

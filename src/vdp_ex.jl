@@ -885,5 +885,5 @@ bd = @pgf Axis(
 )
 @pgf bd["every axis title/.style"] = "below right,at={(0,1)}";
 
-pgfsave("./Figures/num_vdp/bd_vdp.pdf", bd)
-pgfsave("./Figures/num_vdp/gp_vdp.pdf", gp)
+pgfsave("./Figure/num_vdp/bd_vdp.pdf", bd)
+pgfsave("./Figure/num_vdp/gp_vdp.pdf", gp)

@@ -396,7 +396,7 @@ bdp = @pgf Axis(
     ),
 )
 @pgf bdp["every axis title/.style"] = "below right,at={(0,1)}";
-pgfsave("./Figures2/physical/bd_val.pdf", bdp)
+pgfsave("./Figure/physical/bd_val.pdf", bdp)
 
 
 b_1 = @pgf Axis(
@@ -606,5 +606,5 @@ gp = @pgf GroupPlot(
     a_1, b_1,c_1,d_1,a_2,b_2,c_2,d_2)
 
 
-pgfsave("./Figures2/physical/bd_val.pdf", bdp)
-pgfsave("./Figures2/physical/pp_ts_val.pdf", gp)
+pgfsave("./Figure/physical/bd_val.pdf", bdp)
+pgfsave("./Figure/physical/pp_ts_val.pdf", gp)

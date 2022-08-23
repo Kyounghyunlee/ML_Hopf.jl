@@ -599,8 +599,8 @@ bd = @pgf Axis(
 @pgf bd["every axis title/.style"] = "below right,at={(0,1)}";
 bd
 ##
-pgfsave("./Figures2/num_flutter/bd_num.pdf", bd)
-pgfsave("./Figures2/num_flutter/gp_num.pdf", gp)
+pgfsave("./Figure/num_flutter/bd_num.pdf", bd)
+pgfsave("./Figure/num_flutter/gp_num.pdf", gp)
 
 
 #data_flutter=(Ap=Ap_u,ts=t_s3,tv=tv,bd=bd,Vel=Vel,h=h,d_P=d_P,d_amp=d_amp,P=P,amp=amp)
